@@ -36,8 +36,8 @@ const FEATURES = [
 function LoginForm() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail] = useState("demo@example.com");
-  const [password, setPassword] = useState("demo12345");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -204,11 +204,6 @@ function LoginForm() {
               {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
-
-          <div className="mt-6 rounded-xl border border-gray-200 bg-white px-4 py-3">
-            <p className="text-xs font-medium text-gray-500">Demo account</p>
-            <p className="mt-0.5 font-mono text-xs text-gray-700">demo@example.com · demo12345</p>
-          </div>
         </div>
       </div>
     </main>

@@ -1,4 +1,6 @@
-// Auth configuration. Token *state* now lives in React Context
+// Auth configuration. Token *state* lives in React Context
 // (see context/AuthContext.tsx) rather than localStorage.
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+// Backend API base URL — read from the environment (.env.local / host config).
+// Set NEXT_PUBLIC_API_URL; see .env.example.
+export const API_URL = process.env.NEXT_PUBLIC_API_URL as string;
