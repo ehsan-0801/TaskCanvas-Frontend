@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/*
+  TaskCanvas design tokens.
+  Primary accent: dark teal. Page background: powder blue.
+  Primary UI font: Sora (rounded-geometric), mono: JetBrains Mono.
+*/
+@theme inline {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+
+  /* Dark-teal accent ramp — used everywhere the app used to use indigo. */
+  --color-teal-50: #e9f6f4;
+  --color-teal-100: #c6e9e4;
+  --color-teal-200: #93d5cc;
+  --color-teal-300: #57b9ad;
+  --color-teal-400: #2c9a8e;
+  --color-teal-500: #147d72;
+  --color-teal-600: #0d685e;
+  --color-teal-700: #0b544c;
+  --color-teal-800: #0c443e;
+  --color-teal-900: #0a3833;
+
+  /* Powder-blue page background (extra light). */
+  --color-powder: #e8f5fa;
+}
+
+:root {
+  --background: #e8f5fa; /* extra-light powder blue */
+  --foreground: #0f172a; /* slate-900 text */
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Thin, unobtrusive scrollbars for the horizontally scrollable board / image strip */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #93c5cf transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #93c5cf;
+  border-radius: 9999px;
+}
+
+/* Respect reduced-motion for the drag/hover transitions used across the app */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
