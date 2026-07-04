@@ -5,20 +5,20 @@ import { ReactNode, useEffect } from "react";
 
 import { useAuth } from "@/context/AuthContext";
 
-// Client-side route guard for protected pages. Redirects to /login when there
-// is no authenticated session, and renders nothing until the redirect happens
-// so protected content never flashes for unauthenticated visitors.
+// Client-side route guard for protected pages. Once auth state has hydrated,
+// unauthenticated visitors are redirected to /login. Renders a spinner until
+// then so protected content never flashes.
 export function AuthGuard({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, initializing } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!initializing && !isAuthenticated) {
       router.replace("/login");
     }
-  }, [isAuthenticated, router]);
+  }, [initializing, isAuthenticated, router]);
 
-  if (!isAuthenticated) {
+  if (initializing || !isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-powder">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-teal-600" />
