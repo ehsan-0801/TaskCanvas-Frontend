@@ -1,138 +1,111 @@
 # TaskCanvas — Frontend
 
-Next.js (App Router) + TypeScript client for TaskCanvas: JWT login, a
-drag-and-drop Kanban board filtered by date, and an image-annotation tool with
-polygon drawing on a canvas.
+This is the web app for TaskCanvas — the thing people actually click on. It's a
+Next.js (App Router) project in TypeScript that talks to the Django API. Two main
+areas: a team-based Kanban board, and an image annotation tool.
 
 Backend repo: https://github.com/ehsan-0801/TaskCanvas-Backend
 
----
+## What you can do in it
 
-## Tech stack
+You sign up (or log in) and land on your task board. From there:
 
-- **Node.js 22** (developed on 22.22.2), **npm 10**
-- **Next.js 16** (App Router) + **TypeScript** (strict, TS-only)
-- **Tailwind CSS 4**
-- **Zustand** — shared selected-date state
-- **@dnd-kit** — drag-and-drop between Kanban columns
-- **react-konva** — polygon drawing canvas
-- **react-hook-form + zod** — task form + validation
-- **axios** — API client with JWT attach + auto-refresh interceptor
+- You pick a **team** and one of its **boards** from the bar at the top. If you own
+  the team there's a Manage button, which is where you create boards, add people to
+  the team by email and password, and choose which boards each person can see.
+- The board itself is the usual three columns — To Do, In Progress, Done. You add
+  and edit tasks in a modal, drag cards between columns, filter by text or tag, and
+  everything's scoped to the date you've selected.
+- The annotation tool lets you upload images, scroll through them, and draw
+  polygons on the canvas — including dragging individual points to reshape a
+  polygon, zooming and panning, and relabelling or recolouring shapes.
 
----
+Members only see the boards they've been granted, and only owners see the Manage
+controls, so what shows up depends on who you're logged in as.
 
-## Setup & run (local)
+## What it's built with
 
-> Start the [backend](https://github.com/ehsan-0801/TaskCanvas-Backend) first —
-> the frontend needs it running (default `http://127.0.0.1:8000`).
+Next.js 16 and TypeScript (strict, no JavaScript files). Tailwind for styling.
+Zustand holds the small bits of shared state — the selected date and the current
+team/board. Drag-and-drop is `@dnd-kit`, the annotation canvas is `react-konva`,
+forms use `react-hook-form` with `zod`, and API calls go through a single axios
+instance that attaches the JWT and quietly refreshes it when it expires.
 
-### 1. Install dependencies
+Developed on Node 22 and npm 10.
+
+## Running it locally
+
+Start the backend first — the frontend is useless without it, and it expects the
+API at `http://127.0.0.1:8000` by default.
 
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local         # set NEXT_PUBLIC_API_URL to your backend
+npm run dev                        # http://localhost:3000
 ```
 
-### 2. Configure environment
+The only environment variable is `NEXT_PUBLIC_API_URL`, the base URL of the Django
+backend.
 
-```bash
-cp .env.example .env.local
-```
+Open http://localhost:3000 and sign in. If you ran the backend seed, the demo
+owner is `demo@example.com` / `demo12345`, and any of the seeded members (for
+example `alice@example.com`) uses `member12345` — log in as a member to see the
+narrower, access-limited view.
 
-| Key | Purpose |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | Base URL of the Django backend (e.g. `http://127.0.0.1:8000`) |
+Other scripts: `npm run build` for a production build, `npm run start` to serve it,
+`npm run lint` for eslint.
 
-### 3. Run the dev server
+## The pages
 
-```bash
-npm run dev                       # http://localhost:3000
-```
-
-Open http://localhost:3000 and log in with the demo credentials:
-
-**Demo credentials:** `demo@example.com` / `demo12345`
-
-### Other scripts
-
-```bash
-npm run build                     # production build
-npm run start                     # serve the production build
-npm run lint                      # eslint
-```
-
----
-
-## Routes
-
-| Route | Access | Purpose |
+| Route | Who | What |
 |---|---|---|
-| `/login` | Public | Email/password login |
-| `/tasks` | Protected | Kanban board (To Do / In Progress / Done) |
-| `/annotate` | Protected | Image upload + polygon annotation |
+| `/login` | public | Email + password sign in |
+| `/register` | public | Create an account and your own workspace |
+| `/tasks` | signed in | Teams, boards and the Kanban board |
+| `/annotate` | signed in | Image upload and polygon annotation |
 
-Protected routes redirect to `/login` when there is no valid session.
+Anything behind a sign-in redirects to `/login` if there's no valid session, and
+`/login` and `/register` bounce you to the board if you're already in.
 
----
+## Deploying to Vercel
 
-## Deployment (Vercel)
+Import the repo, set `NEXT_PUBLIC_API_URL` to the deployed backend URL, and add the
+Vercel domain to `CORS_ALLOWED_ORIGINS` on the backend so the browser is allowed to
+call it. That's it — Vercel detects Next.js on its own.
 
-- Import the repo into Vercel.
-- Set `NEXT_PUBLIC_API_URL` to the deployed backend URL.
-- Set the resulting Vercel domain as `CORS_ALLOWED_ORIGINS` in the backend's env.
+## Difficulties faced and how I solved them
 
----
+The annotation canvas caused the most head-scratching. Polygons are stored as
+normalized 0–1 coordinates so a shape drawn at one size still lands correctly at
+another, which was fine until I added zoom and pan — suddenly the raw pointer
+position no longer matched image space and vertices dropped in the wrong place. The
+fix was to read the cursor with Konva's `getRelativePointerPosition()`, which
+already undoes the stage's scale and offset, so all the polygon maths stays in the
+image's own coordinate space no matter how far you've zoomed. Handle and stroke
+sizes get divided by the zoom so they stay a constant size on screen. It also can't
+render on the server (there's no canvas there), so it loads through `next/dynamic`
+with SSR turned off.
 
-## Difficulties faced and how solved
+Auth had two fiddly bits. The axios interceptors run outside React, but the tokens
+live in React state, so there's a little "bridge" — the auth context registers
+getters and setters that the interceptors read, which keeps the tokens out of
+module-level globals. And when a burst of requests all hit a 401 at once, each one
+used to try refreshing the token separately; now a single in-flight refresh promise
+is shared, the original requests replay once, and only a genuinely failed refresh
+sends you back to login.
 
-- **JWT refresh caused duplicate/racing network calls.** When several requests
-  hit a 401 at once, each tried to refresh the token. **Fix:** the axios
-  response interceptor coalesces concurrent refreshes into a single in-flight
-  promise and replays the original request once, only redirecting to `/login`
-  after a failed refresh (`src/lib/api.ts`).
+Making the board feel quick meant doing things optimistically — creating, editing,
+deleting and dragging all update the screen immediately and roll back if the server
+disagrees. Task creation drops in a temporary card and swaps it for the real one
+once the id comes back, and deleting shows an Undo in the toast that recreates the
+task. Dragging was the tricky case: reorder writes each card's position from its
+index in the column, so if you dragged while a search or tag filter was active you'd
+renumber only the visible cards and quietly break the order of the hidden ones. So
+drag-and-drop just switches off while a filter is on — reordering only ever runs
+against the full, unfiltered list.
 
-- **Tokens live in React state, but interceptors run outside React.** **Fix:** a
-  small "auth bridge" — the `AuthProvider` registers getter/setter accessors that
-  the axios interceptors read, keeping tokens out of module-level globals while
-  still reachable from non-React code (`src/lib/api.ts` + `src/context/AuthContext.tsx`).
-
-- **react-konva crashed during SSR.** It touches the browser `canvas` API, which
-  doesn't exist on the server. **Fix:** load the canvas via
-  `next/dynamic` with `ssr: false` and a loading spinner (`src/app/annotate/page.tsx`).
-
-- **Polygons had to survive canvas resizing.** A shape drawn at one canvas size
-  must render correctly at another. **Fix:** store all polygon points as
-  **normalized 0–1 coordinates** and denormalize to the current stage size on
-  render, with a `ResizeObserver` keeping the stage responsive
-  (`src/components/annotate/AnnotationCanvas.tsx`).
-
-- **Vertex editing + zoom/pan broke coordinate math.** Once the stage could be
-  zoomed and panned, raw pointer positions no longer mapped to image space, so
-  dragging a vertex or adding a point landed in the wrong place. **Fix:** read the
-  pointer with Konva's `getRelativePointerPosition()`, which undoes the stage's
-  scale/offset, so every polygon coordinate stays in the image's own 0–1 space
-  regardless of zoom; stroke/handle sizes are divided by the scale so they stay a
-  constant on-screen size. Dragging a handle persists via `PATCH .../polygons/:id`
-  with the new normalized points.
-
-- **Mutations felt slow waiting on the network.** Creating, editing, and deleting
-  tasks and reshaping polygons all **update the UI optimistically** and roll back
-  on failure. Task creation inserts a temporary card and reconciles it with the
-  server id, and deletes surface an **Undo** action in the toast that recreates the
-  task.
-
-- **DateSelector had to stay decoupled from task logic.** **Fix:** the selected
-  date lives in a standalone Zustand store (`src/store/useDateStore.ts`) and
-  `<DateSelector/>` is a pure presentational control — the board reads the date
-  from the store, so the two share no task-specific code.
-
-- **Drag-and-drop felt laggy against network latency.** **Fix:** optimistic
-  updates — the board reorders locally immediately and rolls back to the previous
-  state if the `reorder` request fails.
-
-- **Search/tag filtering could corrupt drag ordering.** Reorder persists each
-  card's `order` from its index within a column, so dragging inside a *filtered*
-  view would renumber only the visible cards and desync the hidden ones. **Fix:**
-  drag-and-drop is disabled whenever a filter is active (`dndDisabled` threaded
-  from the page down to each `useSortable`), so reordering only ever runs against
-  the complete, unfiltered list.
+The selected date lives in its own Zustand store rather than inside the board,
+which keeps the `<DateSelector/>` a plain presentational component with no task
+logic in it. When teams came along I did the same thing for the current team and
+board, so switching either one re-derives cleanly without tangling state together.
