@@ -4,6 +4,9 @@ This is the web app for TaskCanvas — the thing people actually click on. It's 
 Next.js (App Router) project in TypeScript that talks to the Django API. Two main
 areas: a team-based Kanban board, and an image annotation tool.
 
+Live app: https://task-canvas-annotate.vercel.app
+Live API: https://taskcanvas-backend-lgo8.onrender.com
+
 Backend repo: https://github.com/ehsan-0801/TaskCanvas-Backend
 
 ## What you can do in it
