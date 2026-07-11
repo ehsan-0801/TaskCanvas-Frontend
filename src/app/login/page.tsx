@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -204,6 +205,13 @@ function LoginForm() {
               {loading ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+
+          <p className="mt-6 text-center text-sm text-gray-500">
+            Don&apos;t have an account?{" "}
+            <Link href="/register" className="font-medium text-teal-600 hover:text-teal-700">
+              Create one
+            </Link>
+          </p>
         </div>
       </div>
     </main>

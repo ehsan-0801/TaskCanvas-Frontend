@@ -7,12 +7,21 @@ import axios, {
 import { API_URL } from "./auth";
 import type {
   AnnotationImage,
+  Board,
+  BoardGrant,
+  Member,
   Point,
   Polygon,
   Tag,
   Task,
   TaskInput,
+  Team,
 } from "./types";
+
+// Every list endpoint is paginated; unwrap {results} or accept a bare array.
+function unwrap<T>(data: T[] | { results: T[] }): T[] {
+  return Array.isArray(data) ? data : data.results ?? [];
+}
 
 // Bridge to the React auth Context. Interceptors run outside React, so the
 // AuthProvider registers these accessors to expose the current in-memory token
@@ -92,13 +101,97 @@ api.interceptors.response.use(
   }
 );
 
+/* ------------------------- Auth: register ------------------------ */
+
+export async function register(
+  email: string,
+  password: string,
+  name?: string
+): Promise<{ access: string; refresh: string }> {
+  const { data } = await api.post("/api/auth/register/", { email, password, name });
+  return data;
+}
+
+/* ------------------------------ Teams ---------------------------- */
+
+export async function fetchTeams(): Promise<Team[]> {
+  const { data } = await api.get<Team[] | { results: Team[] }>("/api/teams/");
+  return unwrap(data);
+}
+
+export async function createTeam(name: string): Promise<Team> {
+  const { data } = await api.post<Team>("/api/teams/", { name });
+  return data;
+}
+
+export async function deleteTeam(id: number): Promise<void> {
+  await api.delete(`/api/teams/${id}/`);
+}
+
+export async function fetchMembers(teamId: number): Promise<Member[]> {
+  const { data } = await api.get<Member[]>(`/api/teams/${teamId}/members/`);
+  return data;
+}
+
+export async function addMember(
+  teamId: number,
+  email: string,
+  password?: string,
+  name?: string
+): Promise<Member> {
+  const { data } = await api.post<Member>(`/api/teams/${teamId}/members/`, {
+    email,
+    password,
+    name,
+  });
+  return data;
+}
+
+export async function removeMember(teamId: number, userId: number): Promise<void> {
+  await api.delete(`/api/teams/${teamId}/members/${userId}/`);
+}
+
+/* ------------------------------ Boards --------------------------- */
+
+export async function fetchBoards(teamId: number): Promise<Board[]> {
+  const { data } = await api.get<Board[] | { results: Board[] }>("/api/boards/", {
+    params: { team: teamId },
+  });
+  return unwrap(data);
+}
+
+export async function createBoard(teamId: number, name: string): Promise<Board> {
+  const { data } = await api.post<Board>("/api/boards/", { team: teamId, name });
+  return data;
+}
+
+export async function deleteBoard(id: number): Promise<void> {
+  await api.delete(`/api/boards/${id}/`);
+}
+
+export async function fetchBoardAccess(boardId: number): Promise<BoardGrant[]> {
+  const { data } = await api.get<BoardGrant[]>(`/api/boards/${boardId}/access/`);
+  return data;
+}
+
+export async function grantBoardAccess(boardId: number, userId: number): Promise<BoardGrant> {
+  const { data } = await api.post<BoardGrant>(`/api/boards/${boardId}/access/`, {
+    user_id: userId,
+  });
+  return data;
+}
+
+export async function revokeBoardAccess(boardId: number, userId: number): Promise<void> {
+  await api.delete(`/api/boards/${boardId}/access/${userId}/`);
+}
+
 /* ----------------------------- Tasks ----------------------------- */
 
-export async function fetchTasks(date: string): Promise<Task[]> {
+export async function fetchTasks(boardId: number, date: string): Promise<Task[]> {
   const { data } = await api.get<Task[] | { results: Task[] }>("/api/tasks/", {
-    params: { date },
+    params: { board: boardId, date },
   });
-  return Array.isArray(data) ? data : data.results ?? [];
+  return unwrap(data);
 }
 
 export async function createTask(input: TaskInput): Promise<Task> {
@@ -130,15 +223,15 @@ export async function reorderTasks(updates: ReorderUpdate[]): Promise<void> {
 
 /* ------------------------------ Tags ----------------------------- */
 
-export async function fetchTags(): Promise<Tag[]> {
-  const { data } = await api.get<Tag[] | { results: Tag[] }>(
-    "/api/tasks/tags/"
-  );
-  return Array.isArray(data) ? data : data.results ?? [];
+export async function fetchTags(teamId: number): Promise<Tag[]> {
+  const { data } = await api.get<Tag[] | { results: Tag[] }>("/api/tags/", {
+    params: { team: teamId },
+  });
+  return unwrap(data);
 }
 
-export async function createTag(name: string): Promise<Tag> {
-  const { data } = await api.post<Tag>("/api/tasks/tags/", { name });
+export async function createTag(teamId: number, name: string): Promise<Tag> {
+  const { data } = await api.post<Tag>("/api/tags/", { team: teamId, name });
   return data;
 }
 

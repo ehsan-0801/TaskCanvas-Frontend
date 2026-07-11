@@ -3,13 +3,48 @@
 export type TaskStatus = "todo" | "in_progress" | "done";
 export type TaskPriority = "low" | "medium" | "high";
 
+export type TeamRole = "owner" | "member";
+
+export interface Team {
+  id: number;
+  name: string;
+  owner: number;
+  role: TeamRole;
+  member_count: number;
+  created_at: string;
+}
+
+export interface Board {
+  id: number;
+  team: number;
+  name: string;
+  created_at: string;
+}
+
+export interface Member {
+  user_id: number;
+  email: string;
+  name: string;
+  role: TeamRole;
+  created_at: string;
+}
+
+export interface BoardGrant {
+  id: number;
+  user_id: number;
+  email: string;
+  created_at: string;
+}
+
 export interface Tag {
   id: number;
   name: string;
+  team: number;
 }
 
 export interface Task {
   id: number;
+  board: number;
   title: string;
   description: string;
   status: TaskStatus;
@@ -22,6 +57,7 @@ export interface Task {
 }
 
 export interface TaskInput {
+  board: number;
   title: string;
   description?: string;
   status: TaskStatus;

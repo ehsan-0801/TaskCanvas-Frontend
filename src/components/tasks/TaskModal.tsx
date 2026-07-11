@@ -24,6 +24,7 @@ interface TaskModalProps {
   open: boolean;
   onClose: () => void;
   task: Task | null; // null → create mode
+  boardId: number;
   defaultStatus: TaskStatus;
   defaultDate: string;
   tags: Tag[];
@@ -39,6 +40,7 @@ export function TaskModal({
   open,
   onClose,
   task,
+  boardId,
   defaultStatus,
   defaultDate,
   tags,
@@ -106,6 +108,7 @@ export function TaskModal({
     try {
       await onSubmit(
         {
+          board: boardId,
           title: values.title.trim(),
           description: values.description ?? "",
           status: values.status,
