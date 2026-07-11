@@ -47,9 +47,10 @@ interface BoardProps {
   onChange: (tasks: Task[]) => void;
   onAdd: (status: TaskStatus) => void;
   onEdit: (task: Task) => void;
+  dndDisabled?: boolean;
 }
 
-export function Board({ tasks, onChange, onAdd, onEdit }: BoardProps) {
+export function Board({ tasks, onChange, onAdd, onEdit, dndDisabled = false }: BoardProps) {
   const { toast } = useToast();
   const [columns, setColumns] = useState<Columns>(() => group(tasks));
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -188,6 +189,7 @@ export function Board({ tasks, onChange, onAdd, onEdit }: BoardProps) {
             onAdd={onAdd}
             onEdit={onEdit}
             isActiveDropTarget={activeId !== null && overColumn === status}
+            dndDisabled={dndDisabled}
           />
         ))}
       </div>

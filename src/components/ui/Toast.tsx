@@ -10,14 +10,20 @@ import {
 
 type ToastKind = "success" | "error" | "info";
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastItem {
   id: number;
   kind: ToastKind;
   message: string;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  toast: (message: string, kind?: ToastKind) => void;
+  toast: (message: string, kind?: ToastKind, action?: ToastAction) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -37,13 +43,19 @@ const kindStyles: Record<ToastKind, string> = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
 
-  const toast = useCallback((message: string, kind: ToastKind = "info") => {
-    const id = Date.now() + Math.random();
-    setItems((prev) => [...prev, { id, kind, message }]);
-    window.setTimeout(() => {
-      setItems((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+  const dismiss = useCallback((id: number) => {
+    setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const toast = useCallback(
+    (message: string, kind: ToastKind = "info", action?: ToastAction) => {
+      const id = Date.now() + Math.random();
+      setItems((prev) => [...prev, { id, kind, message, action }]);
+      // Actionable toasts linger a little longer so there's time to click.
+      window.setTimeout(() => dismiss(id), action ? 6000 : 4000);
+    },
+    [dismiss]
+  );
 
   return (
     <ToastContext.Provider value={{ toast }}>
@@ -56,9 +68,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {items.map((item) => (
           <div
             key={item.id}
-            className={`pointer-events-auto rounded-xl border px-4 py-3 text-sm font-medium shadow-sm ${kindStyles[item.kind]}`}
+            className={`pointer-events-auto flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm font-medium shadow-sm ${kindStyles[item.kind]}`}
           >
-            {item.message}
+            <span>{item.message}</span>
+            {item.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  item.action?.onClick();
+                  dismiss(item.id);
+                }}
+                className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold underline underline-offset-2 transition hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-current"
+              >
+                {item.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

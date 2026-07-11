@@ -191,6 +191,17 @@ export async function createPolygon(
   return data;
 }
 
+export async function updatePolygon(
+  polygonId: number,
+  patch: Partial<Pick<Polygon, "label" | "color" | "points">>
+): Promise<Polygon> {
+  const { data } = await api.patch<Polygon>(
+    `/api/images/polygons/${polygonId}/`,
+    patch
+  );
+  return data;
+}
+
 export async function deletePolygon(polygonId: number): Promise<void> {
   await api.delete(`/api/images/polygons/${polygonId}/`);
 }

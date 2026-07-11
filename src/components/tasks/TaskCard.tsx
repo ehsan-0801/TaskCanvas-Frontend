@@ -9,7 +9,7 @@ import { PRIORITY_LABELS, PRIORITY_STYLES } from "./priority";
 interface TaskCardProps {
   task: Task;
   onEdit: (task: Task) => void;
-  overlay?: boolean;
+  disabled?: boolean;
 }
 
 function formatDue(date: string | null): string | null {
@@ -84,9 +84,9 @@ export function TaskCardOverlay({ task, onEdit }: { task: Task; onEdit: (t: Task
   );
 }
 
-export function TaskCard({ task, onEdit }: TaskCardProps) {
+export function TaskCard({ task, onEdit, disabled = false }: TaskCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: task.id });
+    useSortable({ id: task.id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),

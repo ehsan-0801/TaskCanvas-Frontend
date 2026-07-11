@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -50,6 +50,37 @@ function TasksView() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [modalStatus, setModalStatus] = useState<TaskStatus>("todo");
 
+  // Client-side filtering of the date's tasks by text and tags.
+  const [query, setQuery] = useState("");
+  const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
+  const filtersActive = query.trim() !== "" || filterTagIds.length > 0;
+
+  const visibleTasks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const matchesQuery =
+        !q ||
+        task.title.toLowerCase().includes(q) ||
+        task.description.toLowerCase().includes(q);
+      // A task must carry *all* selected tags to match.
+      const matchesTags =
+        filterTagIds.length === 0 ||
+        filterTagIds.every((id) => task.tags.some((tag) => tag.id === id));
+      return matchesQuery && matchesTags;
+    });
+  }, [tasks, query, filterTagIds]);
+
+  function toggleFilterTag(id: number) {
+    setFilterTagIds((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setFilterTagIds([]);
+  }
+
   const loadTasks = useCallback(
     async (date: string) => {
       setLoading(true);
@@ -88,31 +119,108 @@ function TasksView() {
     setModalOpen(true);
   }
 
+  // Merge a form input onto a task, resolving tag_ids to full Tag objects so the
+  // optimistic card renders identically to the server response.
+  function applyInput(base: Task, input: TaskInput): Task {
+    return {
+      ...base,
+      title: input.title,
+      description: input.description ?? "",
+      status: input.status,
+      priority: input.priority,
+      due_date: input.due_date,
+      tags: tags.filter((t) => input.tag_ids.includes(t.id)),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function nextOrder(status: TaskStatus): number {
+    const inColumn = tasks.filter((t) => t.status === status);
+    return inColumn.reduce((max, t) => Math.max(max, t.order), -1) + 1;
+  }
+
   async function handleSubmit(input: TaskInput, id?: number) {
-    try {
-      if (id) {
+    if (id) {
+      // Optimistic edit — apply immediately, roll back if the server rejects.
+      const previous = tasks;
+      const existing = tasks.find((t) => t.id === id);
+      if (existing) {
+        setTasks((prev) => prev.map((t) => (t.id === id ? applyInput(existing, input) : t)));
+      }
+      try {
         const updated = await updateTask(id, input);
         setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
-        toast("Task updated.", "success");
-      } else {
-        const created = await createTask(input);
-        // Only show it if it belongs to the day we're viewing.
-        if (created.due_date === selectedDate) {
-          setTasks((prev) => [...prev, created]);
-        }
-        toast("Task created.", "success");
+      } catch {
+        setTasks(previous);
+        toast("Couldn't save changes — reverted.", "error");
       }
+      return;
+    }
+
+    // Optimistic create — insert a temp card, reconcile with the server id.
+    const now = new Date().toISOString();
+    const tempId = -Date.now();
+    const optimistic: Task = {
+      id: tempId,
+      title: input.title,
+      description: input.description ?? "",
+      status: input.status,
+      priority: input.priority,
+      due_date: input.due_date,
+      order: nextOrder(input.status),
+      tags: tags.filter((t) => input.tag_ids.includes(t.id)),
+      created_at: now,
+      updated_at: now,
+    };
+    const onThisDay = input.due_date === selectedDate;
+    if (onThisDay) setTasks((prev) => [...prev, optimistic]);
+    try {
+      const created = await createTask(input);
+      setTasks((prev) => {
+        const withoutTemp = prev.filter((t) => t.id !== tempId);
+        return created.due_date === selectedDate ? [...withoutTemp, created] : withoutTemp;
+      });
     } catch {
-      toast("Something went wrong saving the task.", "error");
-      throw new Error("save failed");
+      setTasks((prev) => prev.filter((t) => t.id !== tempId));
+      toast("Couldn't create the task.", "error");
+    }
+  }
+
+  // Recreate a deleted task (undo). It gets a fresh server id, then reconciles.
+  async function restoreTask(task: Task) {
+    if (task.due_date === selectedDate) {
+      setTasks((prev) => [...prev, task]);
+    }
+    try {
+      const recreated = await createTask({
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        priority: task.priority,
+        due_date: task.due_date,
+        tag_ids: task.tags.map((t) => t.id),
+      });
+      setTasks((prev) =>
+        prev.some((t) => t.id === task.id)
+          ? prev.map((t) => (t.id === task.id ? recreated : t))
+          : prev
+      );
+    } catch {
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      toast("Couldn't restore the task.", "error");
     }
   }
 
   async function handleDelete(id: number) {
+    const removed = tasks.find((t) => t.id === id) ?? null;
     try {
       await deleteTask(id);
       setTasks((prev) => prev.filter((t) => t.id !== id));
-      toast("Task deleted.", "success");
+      if (removed) {
+        toast("Task deleted.", "success", { label: "Undo", onClick: () => restoreTask(removed) });
+      } else {
+        toast("Task deleted.", "success");
+      }
     } catch {
       toast("Couldn't delete the task.", "error");
       throw new Error("delete failed");
@@ -150,13 +258,69 @@ function TasksView() {
         </div>
 
         {/* DateSelector is visually separate from the board — its independence is obvious. */}
-        <div className="mb-6">
+        <div className="mb-4">
           <DateSelector
             value={selectedDate}
             onChange={setSelectedDate}
             onShift={shiftDays}
             onToday={goToToday}
           />
+        </div>
+
+        {/* Filter bar — search + tag filters, decoupled from the date state. */}
+        <div className="mb-6 flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tasks…"
+              aria-label="Search tasks by title or description"
+              className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+            />
+          </div>
+
+          {tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {tags.map((tag) => {
+                const on = filterTagIds.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => toggleFilterTag(tag.id)}
+                    aria-pressed={on}
+                    className={`rounded-full px-3 py-1 font-mono text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${
+                      on
+                        ? "bg-teal-600 text-white"
+                        : "bg-teal-50 text-teal-700 hover:bg-teal-100"
+                    }`}
+                  >
+                    {tag.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="ml-auto inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+            >
+              Clear filters
+              <span className="text-gray-400">
+                ({visibleTasks.length}/{tasks.length})
+              </span>
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -174,7 +338,13 @@ function TasksView() {
             </Button>
           </div>
         ) : (
-          <Board tasks={tasks} onChange={setTasks} onAdd={openCreate} onEdit={openEdit} />
+          <Board
+            tasks={visibleTasks}
+            onChange={setTasks}
+            onAdd={openCreate}
+            onEdit={openEdit}
+            dndDisabled={filtersActive}
+          />
         )}
       </main>
 

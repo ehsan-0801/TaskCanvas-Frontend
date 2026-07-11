@@ -15,6 +15,7 @@ import {
   deletePolygon,
   fetchImages,
   fetchPolygons,
+  updatePolygon,
   uploadImage,
 } from "@/lib/api";
 import type { AnnotationImage, Point, Polygon } from "@/lib/types";
@@ -119,6 +120,24 @@ function AnnotateView() {
     }
   }
 
+  async function handleUpdatePolygon(
+    id: number,
+    patch: Partial<Pick<Polygon, "label" | "color" | "points">>
+  ) {
+    const previous = polygons;
+    // Optimistic — apply the label/color change immediately.
+    setPolygons((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
+    );
+    try {
+      const updated = await updatePolygon(id, patch);
+      setPolygons((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    } catch {
+      setPolygons(previous);
+      toast("Couldn't update the shape.", "error");
+    }
+  }
+
   async function handleDeletePolygon(id: number) {
     const previous = polygons;
     setPolygons((prev) => prev.filter((p) => p.id !== id));
@@ -177,6 +196,7 @@ function AnnotateView() {
                     onDeleteSelected={() =>
                       selectedPolygon !== null && handleDeletePolygon(selectedPolygon)
                     }
+                    onUpdatePoints={(id, points) => handleUpdatePolygon(id, { points })}
                   />
                 )}
               </div>
@@ -193,6 +213,7 @@ function AnnotateView() {
                   selectedId={selectedPolygon}
                   onSelect={setSelectedPolygon}
                   onDelete={handleDeletePolygon}
+                  onUpdate={handleUpdatePolygon}
                 />
               </aside>
             </div>

@@ -13,9 +13,10 @@ interface ColumnProps {
   onAdd: (status: TaskStatus) => void;
   onEdit: (task: Task) => void;
   isActiveDropTarget: boolean;
+  dndDisabled?: boolean;
 }
 
-export function Column({ status, tasks, onAdd, onEdit, isActiveDropTarget }: ColumnProps) {
+export function Column({ status, tasks, onAdd, onEdit, isActiveDropTarget, dndDisabled }: ColumnProps) {
   const { setNodeRef } = useDroppable({ id: status });
 
   return (
@@ -53,7 +54,9 @@ export function Column({ status, tasks, onAdd, onEdit, isActiveDropTarget }: Col
               </p>
             </div>
           ) : (
-            tasks.map((task) => <TaskCard key={task.id} task={task} onEdit={onEdit} />)
+            tasks.map((task) => (
+              <TaskCard key={task.id} task={task} onEdit={onEdit} disabled={dndDisabled} />
+            ))
           )}
         </SortableContext>
       </div>

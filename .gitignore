@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Docs: keep only README.md under version control, ignore all other markdown
+*.md
+!README.md
