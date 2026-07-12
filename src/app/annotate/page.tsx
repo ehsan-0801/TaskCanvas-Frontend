@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { AuthGuard } from "@/components/AuthGuard";
@@ -20,7 +20,6 @@ import {
 } from "@/lib/api";
 import type { AnnotationImage, Point, Polygon } from "@/lib/types";
 
-// react-konva touches the browser canvas API — never render it on the server.
 const AnnotationCanvas = dynamic(
   () => import("@/components/annotate/AnnotationCanvas").then((m) => m.AnnotationCanvas),
   {
@@ -33,19 +32,91 @@ const AnnotationCanvas = dynamic(
   }
 );
 
+const DUPLICATE_OFFSET = 0.02;
+
+type PolygonPatch = Partial<Pick<Polygon, "label" | "color" | "points" | "label_x" | "label_y">>;
+
+/** Enough of a shape to recreate it after an undo. */
+interface SavedShape {
+  id: number;
+  points: Point[];
+  color: string;
+  label: string;
+  label_x: number | null;
+  label_y: number | null;
+}
+
+/**
+ * One undoable action. Recreating a deleted shape gives it a *new* server id,
+ * so ids inside the stacks are remapped whenever that happens.
+ */
+type Op =
+  | { type: "add"; items: SavedShape[] }
+  | { type: "remove"; items: SavedShape[] }
+  | { type: "modify"; id: number; before: PolygonPatch; after: PolygonPatch };
+
+const toSaved = (p: Polygon): SavedShape => ({
+  id: p.id,
+  points: p.points,
+  color: p.color,
+  label: p.label,
+  label_x: p.label_x,
+  label_y: p.label_y,
+});
+
+/** Recreate a shape exactly as it was, label placement included. */
+const restore = (imageId: number, s: SavedShape) =>
+  createPolygon(imageId, s.points, s.color, s.label, s.label_x, s.label_y);
+
 function AnnotateView() {
   const { toast } = useToast();
   const [images, setImages] = useState<AnnotationImage[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [polygons, setPolygons] = useState<Polygon[]>([]);
-  const [selectedPolygon, setSelectedPolygon] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState<Record<string, number>>({});
+
+  // History is per-image and lives in refs so the handlers never read a stale copy.
+  // The two booleans mirror the stacks for rendering (a ref isn't reactive).
+  const undoStack = useRef<Op[]>([]);
+  const redoStack = useRef<Op[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  const syncHistory = useCallback(() => {
+    setCanUndo(undoStack.current.length > 0);
+    setCanRedo(redoStack.current.length > 0);
+  }, []);
 
   const activeImage = useMemo(
     () => images.find((img) => img.id === activeId) ?? null,
     [images, activeId]
   );
+
+  const record = useCallback(
+    (op: Op) => {
+      undoStack.current.push(op);
+      redoStack.current = []; // a fresh action invalidates the redo branch
+      syncHistory();
+    },
+    [syncHistory]
+  );
+
+  /** After a shape is recreated it has a new id — rewrite every reference to it. */
+  const remapId = useCallback((oldId: number, newId: number) => {
+    const fix = (ops: Op[]) =>
+      ops.map((op): Op => {
+        if (op.type === "modify") return op.id === oldId ? { ...op, id: newId } : op;
+        return {
+          ...op,
+          items: op.items.map((it) => (it.id === oldId ? { ...it, id: newId } : it)),
+        };
+      });
+    undoStack.current = fix(undoStack.current);
+    redoStack.current = fix(redoStack.current);
+    setSelectedIds((prev) => prev.map((id) => (id === oldId ? newId : id)));
+  }, []);
 
   useEffect(() => {
     fetchImages()
@@ -57,17 +128,22 @@ function AnnotateView() {
       .finally(() => setLoading(false));
   }, [toast]);
 
-  // Load polygons for the active image.
+  // Switching image resets the selection and the history.
   useEffect(() => {
+    undoStack.current = [];
+    redoStack.current = [];
+    syncHistory();
     if (activeId === null) {
       setPolygons([]);
       return;
     }
-    setSelectedPolygon(null);
+    setSelectedIds([]);
     fetchPolygons(activeId)
       .then(setPolygons)
       .catch(() => toast("Couldn't load shapes for this image.", "error"));
-  }, [activeId, toast]);
+  }, [activeId, toast, syncHistory]);
+
+  /* ------------------------------ uploads -------------------------------- */
 
   const handleUpload = useCallback(
     async (files: File[]) => {
@@ -109,45 +185,179 @@ function AnnotateView() {
     }
   }
 
+  /* ------------------------------- shapes -------------------------------- */
+
   async function handleCreatePolygon(points: Point[], color: string) {
     if (activeId === null) return;
     try {
       const created = await createPolygon(activeId, points, color);
       setPolygons((prev) => [...prev, created]);
-      setSelectedPolygon(created.id);
+      setSelectedIds([created.id]);
+      record({ type: "add", items: [toSaved(created)] });
     } catch {
       toast("Couldn't save the shape.", "error");
     }
   }
 
-  async function handleUpdatePolygon(
-    id: number,
-    patch: Partial<Pick<Polygon, "label" | "color" | "points">>
-  ) {
+  async function handleUpdatePolygon(id: number, patch: PolygonPatch) {
+    const current = polygons.find((p) => p.id === id);
+    if (!current) return;
+
+    // Snapshot just the fields being changed, so undo can put them back.
+    const before: PolygonPatch = {};
+    if (patch.points !== undefined) before.points = current.points;
+    if (patch.color !== undefined) before.color = current.color;
+    if (patch.label !== undefined) before.label = current.label;
+    if (patch.label_x !== undefined) before.label_x = current.label_x;
+    if (patch.label_y !== undefined) before.label_y = current.label_y;
+
     const previous = polygons;
-    // Optimistic — apply the label/color change immediately.
-    setPolygons((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
-    );
+    setPolygons((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
     try {
       const updated = await updatePolygon(id, patch);
       setPolygons((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      record({ type: "modify", id, before, after: patch });
     } catch {
       setPolygons(previous);
       toast("Couldn't update the shape.", "error");
     }
   }
 
-  async function handleDeletePolygon(id: number) {
+  async function handleDeletePolygons(ids: number[]) {
+    if (ids.length === 0) return;
+    const removed = polygons.filter((p) => ids.includes(p.id));
     const previous = polygons;
-    setPolygons((prev) => prev.filter((p) => p.id !== id));
-    if (selectedPolygon === id) setSelectedPolygon(null);
+    setPolygons((prev) => prev.filter((p) => !ids.includes(p.id)));
+    setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
     try {
-      await deletePolygon(id);
+      await Promise.all(ids.map((id) => deletePolygon(id)));
+      record({ type: "remove", items: removed.map(toSaved) });
     } catch {
       setPolygons(previous);
-      toast("Couldn't delete the shape.", "error");
+      toast("Couldn't delete the shape(s).", "error");
     }
+  }
+
+  async function handleDuplicate(ids: number[]) {
+    if (activeId === null || ids.length === 0) return;
+    const sources = polygons.filter((p) => ids.includes(p.id));
+    try {
+      const copies = await Promise.all(
+        sources.map((p) =>
+          createPolygon(
+            activeId,
+            p.points.map(
+              ([x, y]) =>
+                [Math.min(1, x + DUPLICATE_OFFSET), Math.min(1, y + DUPLICATE_OFFSET)] as Point
+            ),
+            p.color,
+            p.label,
+            // A hand-placed label shifts with its copy; an auto one stays auto.
+            p.label_x === null ? null : Math.min(1, p.label_x + DUPLICATE_OFFSET),
+            p.label_y === null ? null : Math.min(1, p.label_y + DUPLICATE_OFFSET)
+          )
+        )
+      );
+      setPolygons((prev) => [...prev, ...copies]);
+      setSelectedIds(copies.map((c) => c.id));
+      record({ type: "add", items: copies.map(toSaved) });
+    } catch {
+      toast("Couldn't duplicate the shape(s).", "error");
+    }
+  }
+
+  // Copying to another image isn't undoable here — it changes a different image.
+  async function handleCopyToImage(ids: number[], targetImageId: number) {
+    const sources = polygons.filter((p) => ids.includes(p.id));
+    if (sources.length === 0) return;
+    try {
+      await Promise.all(sources.map((p) => restore(targetImageId, toSaved(p))));
+      const target = images.findIndex((img) => img.id === targetImageId);
+      toast(
+        `Copied ${sources.length} shape${sources.length > 1 ? "s" : ""} to image ${target + 1}.`,
+        "success"
+      );
+    } catch {
+      toast("Couldn't copy the shape(s).", "error");
+    }
+  }
+
+  /* ----------------------------- undo / redo ----------------------------- */
+
+  const undo = useCallback(async () => {
+    const op = undoStack.current.pop();
+    if (!op) return;
+    syncHistory();
+    try {
+      if (op.type === "add") {
+        const ids = op.items.map((i) => i.id);
+        setPolygons((prev) => prev.filter((p) => !ids.includes(p.id)));
+        setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+        await Promise.all(ids.map((id) => deletePolygon(id)));
+        redoStack.current.push(op);
+      } else if (op.type === "remove") {
+        if (activeId === null) return;
+        const restored = await Promise.all(
+          op.items.map((it) => restore(activeId, it))
+        );
+        setPolygons((prev) => [...prev, ...restored]);
+        op.items.forEach((it, i) => remapId(it.id, restored[i].id));
+        redoStack.current.push({ type: "remove", items: restored.map(toSaved) });
+      } else {
+        setPolygons((prev) => prev.map((p) => (p.id === op.id ? { ...p, ...op.before } : p)));
+        await updatePolygon(op.id, op.before);
+        redoStack.current.push(op);
+      }
+      syncHistory();
+    } catch {
+      toast("Couldn't undo that.", "error");
+    }
+  }, [activeId, remapId, toast, syncHistory]);
+
+  const redo = useCallback(async () => {
+    const op = redoStack.current.pop();
+    if (!op) return;
+    syncHistory();
+    try {
+      if (op.type === "add") {
+        if (activeId === null) return;
+        const restored = await Promise.all(
+          op.items.map((it) => restore(activeId, it))
+        );
+        setPolygons((prev) => [...prev, ...restored]);
+        op.items.forEach((it, i) => remapId(it.id, restored[i].id));
+        undoStack.current.push({ type: "add", items: restored.map(toSaved) });
+      } else if (op.type === "remove") {
+        const ids = op.items.map((i) => i.id);
+        setPolygons((prev) => prev.filter((p) => !ids.includes(p.id)));
+        setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+        await Promise.all(ids.map((id) => deletePolygon(id)));
+        undoStack.current.push(op);
+      } else {
+        setPolygons((prev) => prev.map((p) => (p.id === op.id ? { ...p, ...op.after } : p)));
+        await updatePolygon(op.id, op.after);
+        undoStack.current.push(op);
+      }
+      syncHistory();
+    } catch {
+      toast("Couldn't redo that.", "error");
+    }
+  }, [activeId, remapId, toast, syncHistory]);
+
+  const stepImage = useCallback(
+    (delta: number) => {
+      if (images.length < 2 || activeId === null) return;
+      const i = images.findIndex((img) => img.id === activeId);
+      setActiveId(images[(i + delta + images.length) % images.length].id);
+    },
+    [images, activeId]
+  );
+
+  function selectPolygon(id: number, additive: boolean) {
+    setSelectedIds((prev) => {
+      if (!additive) return [id];
+      return prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id];
+    });
   }
 
   return (
@@ -157,7 +367,7 @@ function AnnotateView() {
         <div className="mb-5">
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Annotation tool</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Upload images, draw polygons, and manage your shapes.
+            Upload images, draw and edit shapes, and manage your annotations.
           </p>
         </div>
 
@@ -189,14 +399,21 @@ function AnnotateView() {
                   <AnnotationCanvas
                     key={activeImage.id}
                     image={activeImage}
+                    images={images}
                     polygons={polygons}
-                    selectedId={selectedPolygon}
-                    onSelect={setSelectedPolygon}
+                    selectedIds={selectedIds}
+                    onSelectionChange={setSelectedIds}
                     onCreate={handleCreatePolygon}
-                    onDeleteSelected={() =>
-                      selectedPolygon !== null && handleDeletePolygon(selectedPolygon)
-                    }
-                    onUpdatePoints={(id, points) => handleUpdatePolygon(id, { points })}
+                    onUpdate={handleUpdatePolygon}
+                    onDelete={handleDeletePolygons}
+                    onDuplicate={handleDuplicate}
+                    onCopyToImage={handleCopyToImage}
+                    onPrevImage={() => stepImage(-1)}
+                    onNextImage={() => stepImage(1)}
+                    onUndo={undo}
+                    onRedo={redo}
+                    canUndo={canUndo}
+                    canRedo={canRedo}
                   />
                 )}
               </div>
@@ -210,9 +427,9 @@ function AnnotateView() {
                 </h2>
                 <PolygonList
                   polygons={polygons}
-                  selectedId={selectedPolygon}
-                  onSelect={setSelectedPolygon}
-                  onDelete={handleDeletePolygon}
+                  selectedIds={selectedIds}
+                  onSelect={selectPolygon}
+                  onDelete={handleDeletePolygons}
                   onUpdate={handleUpdatePolygon}
                 />
               </aside>

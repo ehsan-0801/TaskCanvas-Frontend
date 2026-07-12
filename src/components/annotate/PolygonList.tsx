@@ -7,15 +7,15 @@ import { POLYGON_COLORS } from "./palette";
 
 interface PolygonListProps {
   polygons: Polygon[];
-  selectedId: number | null;
-  onSelect: (id: number) => void;
-  onDelete: (id: number) => void;
+  selectedIds: number[];
+  onSelect: (id: number, additive: boolean) => void;
+  onDelete: (ids: number[]) => void;
   onUpdate: (id: number, patch: Partial<Pick<Polygon, "label" | "color">>) => void;
 }
 
 export function PolygonList({
   polygons,
-  selectedId,
+  selectedIds,
   onSelect,
   onDelete,
   onUpdate,
@@ -23,7 +23,7 @@ export function PolygonList({
   if (polygons.length === 0) {
     return (
       <p className="px-1 py-4 text-center text-xs text-gray-400">
-        No shapes yet. Click on the image to place your first vertex.
+        No shapes yet. Press D, then click on the image to place your first vertex.
       </p>
     );
   }
@@ -31,7 +31,8 @@ export function PolygonList({
   return (
     <ul className="space-y-1.5">
       {polygons.map((polygon, index) => {
-        const active = polygon.id === selectedId;
+        const active = selectedIds.includes(polygon.id);
+        const onlyOne = active && selectedIds.length === 1;
         return (
           <li
             key={polygon.id}
@@ -42,7 +43,7 @@ export function PolygonList({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => onSelect(polygon.id)}
+                onClick={(e) => onSelect(polygon.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 className="flex min-w-0 flex-1 items-center gap-2 text-left focus:outline-none"
               >
                 <span
@@ -58,7 +59,7 @@ export function PolygonList({
               </button>
               <button
                 type="button"
-                onClick={() => onDelete(polygon.id)}
+                onClick={() => onDelete([polygon.id])}
                 aria-label={`Delete ${polygon.label || `polygon ${index + 1}`}`}
                 className="rounded-md p-1 text-gray-400 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
               >
@@ -68,9 +69,7 @@ export function PolygonList({
               </button>
             </div>
 
-            {active && (
-              // Key by id so switching selection re-initializes the editor's
-              // local field state from the newly selected polygon.
+            {onlyOne && (
               <PolygonEditor
                 key={polygon.id}
                 polygon={polygon}
@@ -99,7 +98,6 @@ function PolygonEditor({ polygon, placeholder, onUpdate }: PolygonEditorProps) {
     if (next !== polygon.label) onUpdate(polygon.id, { label: next });
   }
 
-  // Offer the palette plus the current color if it's a custom one.
   const swatches = POLYGON_COLORS.includes(polygon.color)
     ? POLYGON_COLORS
     : [polygon.color, ...POLYGON_COLORS];
@@ -148,6 +146,15 @@ function PolygonEditor({ polygon, placeholder, onUpdate }: PolygonEditorProps) {
             />
           );
         })}
+        {/* Any colour, not just the presets */}
+        <input
+          type="color"
+          value={polygon.color}
+          onChange={(e) => onUpdate(polygon.id, { color: e.target.value })}
+          aria-label="Pick a custom colour"
+          title="Pick a custom colour"
+          className="ml-auto h-6 w-7 cursor-pointer rounded border border-gray-300 bg-white p-0.5"
+        />
       </div>
     </div>
   );

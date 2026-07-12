@@ -83,6 +83,10 @@ export interface Polygon {
   label: string;
   color: string;
   points: Point[];
+  // Where the label chip sits, normalized 0–1. Null means "not placed by hand" —
+  // the canvas then draws it at the shape's centre.
+  label_x: number | null;
+  label_y: number | null;
   created_at: string;
 }
 

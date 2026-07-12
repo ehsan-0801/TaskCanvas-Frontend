@@ -275,18 +275,23 @@ export async function createPolygon(
   imageId: number,
   points: Point[],
   color: string,
-  label = ""
+  label = "",
+  labelX: number | null = null,
+  labelY: number | null = null
 ): Promise<Polygon> {
-  const { data } = await api.post<Polygon>(
-    `/api/images/${imageId}/polygons/`,
-    { points, color, label }
-  );
+  const { data } = await api.post<Polygon>(`/api/images/${imageId}/polygons/`, {
+    points,
+    color,
+    label,
+    label_x: labelX,
+    label_y: labelY,
+  });
   return data;
 }
 
 export async function updatePolygon(
   polygonId: number,
-  patch: Partial<Pick<Polygon, "label" | "color" | "points">>
+  patch: Partial<Pick<Polygon, "label" | "color" | "points" | "label_x" | "label_y">>
 ): Promise<Polygon> {
   const { data } = await api.patch<Polygon>(
     `/api/images/polygons/${polygonId}/`,
