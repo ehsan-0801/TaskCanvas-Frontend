@@ -19,12 +19,36 @@ You sign up (or log in) and land on your task board. From there:
 - The board itself is the usual three columns — To Do, In Progress, Done. You add
   and edit tasks in a modal, drag cards between columns, filter by text or tag, and
   everything's scoped to the date you've selected.
-- The annotation tool lets you upload images, scroll through them, and draw
-  polygons on the canvas — including dragging individual points to reshape a
-  polygon, zooming and panning, and relabelling or recolouring shapes.
+- The annotation tool is the other half of the app, and it's grown a fair bit — see
+  below.
 
 Members only see the boards they've been granted, and only owners see the Manage
 controls, so what shows up depends on who you're logged in as.
+
+## The annotation tool
+
+Upload some images, scroll the thumbnail strip, and draw on them.
+
+You can draw a **polygon** point by point, or drag out a **rectangle, square,
+triangle or circle**. Everything is stored as a list of points (a circle is just a
+smooth many-sided one), which means every shape behaves the same afterwards: you
+can resize it from its bounding-box handles, drag it around, or switch on "Edit
+points" to move individual vertices, insert a new one mid-edge, or delete one.
+
+Shapes carry a **label** drawn on the image itself. Double-click to rename it
+inline, and **drag the label chip wherever you want it** — the position sticks, and
+it moves and scales with its shape if you move or resize that shape. You can reset
+it back to auto-centred whenever.
+
+Beyond that: multi-select with shift-click (then delete, duplicate or recolour the
+lot at once), copy shapes onto another image, any colour you like rather than just
+the presets, zoom and pan, sliders for shape opacity and for image brightness and
+contrast, and **undo/redo** with Ctrl+Z and Ctrl+Y.
+
+Most things have a keyboard shortcut (V select, D polygon, R rectangle, S square,
+T triangle, C circle, E edit points, H hide, Enter rename, Del delete, arrows to
+nudge, `[` and `]` to change image), and right-clicking the canvas, a shape or a
+vertex gives you a context menu for the rest.
 
 ## What it's built with
 
@@ -89,6 +113,15 @@ image's own coordinate space no matter how far you've zoomed. Handle and stroke
 sizes get divided by the zoom so they stay a constant size on screen. It also can't
 render on the server (there's no canvas there), so it loads through `next/dynamic`
 with SSR turned off.
+
+Undo/redo turned out to be sneakier than it looks, because the shapes live on a
+server rather than only in memory. Undoing a delete means *recreating* the shape,
+and the backend hands the new row a **new id**. So the entries still sitting in the
+history stack — a rename, a recolour — were pointing at an id that no longer
+existed, and the next undo would 404. The fix was to remap the old id to the new one
+across both stacks (and the current selection) every time a shape gets recreated. I
+also scoped the history per image and left "copy to another image" out of it, so an
+undo can never quietly change a picture you're not looking at.
 
 Auth had two fiddly bits. The axios interceptors run outside React, but the tokens
 live in React state, so there's a little "bridge" — the auth context registers
